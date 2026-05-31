@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- This filter matches all USB devices.
+         You can narrow it down by adding vendor-id and product-id attributes, e.g.:
+         <usb-device vendor-id="1234" product-id="5678" /> -->
+    <usb-device />
+</resources>
