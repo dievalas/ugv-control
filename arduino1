@@ -1,0 +1,68 @@
+#include <SoftwareSerial.h>
+
+// Assign the physical optocoupler control pins for the camera gimbal
+#define GIMBAL_UP    6  // Physical Pin D6
+#define GIMBAL_DOWN  7  // Physical Pin D7
+#define GIMBAL_LEFT  8  // Physical Pin D8
+#define GIMBAL_RIGHT 9  // Physical Pin D9
+
+// RESTORED ORIGINAL PINS: RX = D2 (Unused), TX = D3
+// Connects directly to Arduino 2 Pin D11
+SoftwareSerial toArduino2(2, 3); 
+
+void setup() {
+  // Open the hardware USB-B serial link at 9600 baud
+  Serial.begin(9600);       
+  
+  // Open the UART data highway connecting to Arduino 2
+  toArduino2.begin(9600);   
+  
+  // Configure gimbal control lines as digital outputs
+  pinMode(GIMBAL_UP, OUTPUT);
+  pinMode(GIMBAL_DOWN, OUTPUT);
+  pinMode(GIMBAL_LEFT, OUTPUT);
+  pinMode(GIMBAL_RIGHT, OUTPUT);
+  
+  // Safety: Force all camera buttons to be RELEASED at bootup
+  allGimbalStop();
+}
+
+void loop() {
+  // Check if internet command characters have dropped through the USB cable
+  if (Serial.available() > 0) {
+    char cmd = Serial.read();
+    
+    // ROUTE 1: FORWARD DRIVE PACKETS
+    if (cmd == 'W' || cmd == 'S' || cmd == 'A' || cmd == 'D' || cmd == 'X') {
+      toArduino2.write(cmd); // Sends out from Pin D3
+    }
+    
+    // ROUTE 2: PROCESS GIMBAL PACKETS LOCALLY
+    if (cmd == 'I') { 
+      allGimbalStop(); 
+      digitalWrite(GIMBAL_UP, HIGH);
+    } 
+    else if (cmd == 'K') { 
+      allGimbalStop(); 
+      digitalWrite(GIMBAL_DOWN, HIGH);
+    } 
+    else if (cmd == 'J') { 
+      allGimbalStop(); 
+      digitalWrite(GIMBAL_LEFT, HIGH);
+    } 
+    else if (cmd == 'L') { 
+      allGimbalStop(); 
+      digitalWrite(GIMBAL_RIGHT, HIGH);
+    } 
+    else if (cmd == 'O') { 
+      allGimbalStop();
+    }
+  }
+}
+
+void allGimbalStop() {
+  digitalWrite(GIMBAL_UP, LOW);
+  digitalWrite(GIMBAL_DOWN, LOW);
+  digitalWrite(GIMBAL_LEFT, LOW);
+  digitalWrite(GIMBAL_RIGHT, LOW);
+}
