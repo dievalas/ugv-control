@@ -1,0 +1,154 @@
+#include <SoftwareSerial.h>
+
+// Assign physical pins for RadioMaster ER6 Receiver
+#define CH2 2      // RC Throttle Stick Input (Pin D2)
+#define CH4 3      // RC Steering Stick Input (Pin D3)
+#define MODE_CH 5  // Physical Toggle Switch Input to swap Mode (Pin D5)
+
+// Assign physical motor driver pins
+#define L_PWM 9
+#define R_PWM 10
+#define L_DIR 7
+#define R_DIR 8
+
+// Onboard L LED used to show which mode is active
+#define INDICATOR_LED 13 
+
+// YOUR EXACT MOTOR PARAMETERS AND LIMITS
+#define STOP_THROTTLE_PWM 40
+#define MIN_DRIVE_PWM 61
+#define MAX_THROTTLE_PWM 214
+
+// Setup software serial highway to listen to Arduino 1
+// RX = D11 (Connects to Arduino 1 Pin D3), TX = D12 (Unused)
+SoftwareSerial uartHighway(11, 12); 
+
+void setup() {
+  uartHighway.begin(9600);  
+  Serial.begin(9600);
+
+  // Configure RC Receiver Inputs
+  pinMode(CH2, INPUT);
+  pinMode(CH4, INPUT);
+  pinMode(MODE_CH, INPUT);
+
+  // Configure Motor Outputs
+  pinMode(L_PWM, OUTPUT);
+  pinMode(R_PWM, OUTPUT);
+  pinMode(L_DIR, OUTPUT);
+  pinMode(R_DIR, OUTPUT);
+  pinMode(INDICATOR_LED, OUTPUT);
+  
+  // Initialize motors to absolute safe stop (40)
+  analogWrite(L_PWM, STOP_THROTTLE_PWM);
+  analogWrite(R_PWM, STOP_THROTTLE_PWM);
+}
+
+void loop() {
+  // Read the physical mode toggle switch from your RadioMaster transmitter
+  // Timeout 3000 microseconds avoids blocking the code loop if receiver is off
+  int modePulse = pulseIn(MODE_CH, HIGH, 3000); 
+  
+  // Failsafe: If receiver has no signal, default to Phone 5G Mode safely
+  if (modePulse < 900 || modePulse > 2100) modePulse = 2000; 
+
+  // Engine control variables matching your -1000 to 1000 scale
+  int t = 0; // Throttle
+  int s = 0; // Steering
+
+  // =======================================================
+  // MODE A: PHONE 5G APP CONTROL (Switch on transmitter is UP)
+  // =======================================================
+  if (modePulse > 1500) {
+    digitalWrite(INDICATOR_LED, HIGH); // LED stays ON solid when in Phone Mode
+    
+    if (uartHighway.available() > 0) {
+      char driveCmd = uartHighway.read();
+      
+      if (driveCmd == 'W')      { t = 1000;  s = 0;    } 
+      else if (driveCmd == 'S') { t = -1000; s = 0;    } 
+      else if (driveCmd == 'A') { t = 0;     s = 1000;  } 
+      else if (driveCmd == 'D') { t = 0;     s = -1000; } 
+      else if (driveCmd == 'X') { t = 0;     s = 0;     }
+    } else {
+      // If no new UART data packet arrived, keep everything stationary
+      t = 0; 
+      s = 0;
+    }
+  } 
+  // =======================================================
+  // MODE B: MANUAL RADIO MASTER CONTROL (Switch on transmitter is DOWN)
+  // =======================================================
+  else {
+    digitalWrite(INDICATOR_LED, LOW); // LED stays OFF when in RC Mode
+    
+    int throttle = pulseIn(CH2, HIGH, 3000);
+    int steering = pulseIn(CH4, HIGH, 3000);
+
+    // Apply your neutral stick formatting rules
+    if (throttle < 900 || throttle > 2100) throttle = 1500;
+    if (steering < 900 || steering > 2100) steering = 1500;
+
+    t = map(throttle, 1000, 2000, -1000, 1000);
+    s = map(steering, 1000, 2000, -1000, 1000);
+
+    // Deadzone application filter
+    if (abs(t) < 50) t = 0;
+    if (abs(s) < 50) s = 0;
+  }
+
+  // ==========================================
+  // YOUR EXACT MOTOR LOGIC & SPEED MIXING BLOCK
+  // ==========================================
+  if (t == 0 && s == 0) {
+    analogWrite(L_PWM, STOP_THROTTLE_PWM);
+    analogWrite(R_PWM, STOP_THROTTLE_PWM);
+    return;
+  }
+
+  int leftCmd = 0;
+  int rightCmd = 0;
+
+  if (t == 0 && s > 0) {
+    // Left pivot turn: Right wheels forward 100%, left wheels reverse 80%
+    rightCmd = abs(s);
+    leftCmd = -(abs(s) * 8 / 10);
+  }
+  else if (t == 0 && s < 0) {
+    // Right pivot turn: Left wheels forward 100%, right wheels reverse 70%
+    leftCmd = abs(s);
+    rightCmd = -(abs(s) * 7 / 10);
+  }
+  else {
+    // Standard sweeping mixed drive
+    leftCmd = t + s;
+    rightCmd = t - s;
+  }
+
+  // Constrain calculations strictly within bounds
+  leftCmd = constrain(leftCmd, -1000, 1000);
+  rightCmd = constrain(rightCmd, -1000, 1000);
+
+  // H-Bridge polarity switching
+  if (leftCmd >= 0) {
+    digitalWrite(L_DIR, LOW);
+  } else {
+    digitalWrite(L_DIR, HIGH);
+    leftCmd = -leftCmd;
+  }
+
+  if (rightCmd >= 0) {
+    digitalWrite(R_DIR, LOW);
+  } else {
+    digitalWrite(R_DIR, HIGH);
+    rightCmd = -rightCmd;
+  }
+
+  // Inject computed vectors back into your precise hardware limits (61 to 214)
+  int leftPWM = map(leftCmd, 0, 1000, MIN_DRIVE_PWM, MAX_THROTTLE_PWM);
+  int rightPWM = map(rightCmd, 0, 1000, MIN_DRIVE_PWM, MAX_THROTTLE_PWM);
+
+  // Deliver current straight to the motors
+  analogWrite(L_PWM, leftPWM);
+  analogWrite(R_PWM, rightPWM);
+}
